@@ -1,0 +1,27 @@
+[project]
+name = "smartmoneyconcepts"
+version = "0.0.26"
+description = "smart-money-concepts"
+authors = [
+    { name = "", email = "a@test.com" }
+]
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "requests>=2.26.0,<3.0.0",
+    "numpy>=1.26.4,<2.0.0",
+    "pandas>=2.2.2,<3.0.0",
+    "binance (>=0.3.81,<0.4.0)",
+]
+
+[project.optional-dependencies]
+dev = [
+
+]
+
+[tool.poetry]
+package-mode = true
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0", "setuptools>=75.5.0"]
+build-backend = "poetry.core.masonry.api"
