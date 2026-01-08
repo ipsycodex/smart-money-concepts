@@ -424,7 +424,8 @@ def add_retracements(fig, df, retracements):
 def import_data(symbol, start_str, timeframe):
     client = Client()
     start_str = str(start_str)
-    end_str = f"{datetime.now()}"
+    # end_str = f"{datetime.now()}"
+    end_str = f"2024-05-01"
     df = pd.DataFrame(
         client.get_historical_klines(
             symbol=symbol, interval=timeframe, start_str=start_str, end_str=end_str

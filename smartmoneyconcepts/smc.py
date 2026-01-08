@@ -53,7 +53,8 @@ class smc:
     __version__ = "0.0.25"
 
     @classmethod
-    def fvg(cls, ohlc: DataFrame, join_consecutive=False) -> Series:
+    def fvg(cls, ohlc: DataFrame, join_consecutive=False, mitigation_threshold: float = 0.0,
+            require_body_mitigation: bool = False) -> Series:
         """
         FVG - Fair Value Gap
         A fair value gap is when the previous high is lower than the next low if the current candle is bullish.
@@ -61,6 +62,8 @@ class smc:
 
         parameters:
         join_consecutive: bool - if there are multiple FVG in a row then they will be merged into one using the highest top and the lowest bottom
+        mitigation_threshold: float - minimum percentage (0.0 to 1.0) of FVG that must be filled to consider it mitigated. Default 0.0 means any touch mitigates.
+        require_body_mitigation: bool - if True, require candle body (not just wick) to mitigate FVG. Default False allows wick mitigation.
 
         returns:
         FVG = 1 if bullish fair value gap, -1 if bearish fair value gap
@@ -71,12 +74,12 @@ class smc:
 
         fvg = np.where(
             (
-                (ohlc["high"].shift(1) < ohlc["low"].shift(-1))
-                & (ohlc["close"] > ohlc["open"])
+                    (ohlc["high"].shift(1) < ohlc["low"].shift(-1))
+                    & (ohlc["close"] > ohlc["open"])
             )
             | (
-                (ohlc["low"].shift(1) > ohlc["high"].shift(-1))
-                & (ohlc["close"] < ohlc["open"])
+                    (ohlc["low"].shift(1) > ohlc["high"].shift(-1))
+                    & (ohlc["close"] < ohlc["open"])
             ),
             np.where(ohlc["close"] > ohlc["open"], 1, -1),
             np.nan,
@@ -110,16 +113,58 @@ class smc:
                     bottom[i + 1] = min(bottom[i], bottom[i + 1])
                     fvg[i] = top[i] = bottom[i] = np.nan
 
+        # Calculate mitigation with advanced logic
         mitigated_index = np.zeros(len(ohlc), dtype=np.int32)
+
+        _open = ohlc["open"].values
+        _close = ohlc["close"].values
+        _high = ohlc["high"].values
+        _low = ohlc["low"].values
+
         for i in np.where(~np.isnan(fvg))[0]:
-            mask = np.zeros(len(ohlc), dtype=np.bool_)
+            fvg_top = top[i]
+            fvg_bottom = bottom[i]
+            fvg_size = fvg_top - fvg_bottom
+
+            # Bullish FVG mitigation
             if fvg[i] == 1:
-                mask = ohlc["low"][i + 2 :] <= top[i]
+                for j in range(i + 2, len(ohlc)):
+                    # Determine penetration point
+                    if require_body_mitigation:
+                        penetration_point = min(_open[j], _close[j])
+                    else:
+                        penetration_point = _low[j]
+
+                    # Check if the price has entered the FVG
+                    if penetration_point < fvg_top:
+                        # Calculate how much of the FVG has been filled
+                        filled_amount = fvg_top - max(penetration_point, fvg_bottom)
+                        filled_percentage = filled_amount / fvg_size if fvg_size > 0 else 1.0
+
+                        # Check if a mitigation threshold is met
+                        if filled_percentage >= mitigation_threshold:
+                            mitigated_index[i] = j
+                            break
+
+            # Bearish FVG mitigation
             elif fvg[i] == -1:
-                mask = ohlc["high"][i + 2 :] >= bottom[i]
-            if np.any(mask):
-                j = np.argmax(mask) + i + 2
-                mitigated_index[i] = j
+                for j in range(i + 2, len(ohlc)):
+                    # Determine penetration point
+                    if require_body_mitigation:
+                        penetration_point = max(_open[j], _close[j])
+                    else:
+                        penetration_point = _high[j]
+
+                    # Check if price has entered the FVG
+                    if penetration_point > fvg_bottom:
+                        # Calculate how much of the FVG has been filled
+                        filled_amount = min(penetration_point, fvg_top) - fvg_bottom
+                        filled_percentage = filled_amount / fvg_size if fvg_size > 0 else 1.0
+
+                        # Check if mitigation threshold is met
+                        if filled_percentage >= mitigation_threshold:
+                            mitigated_index[i] = j
+                            break
 
         mitigated_index = np.where(np.isnan(fvg), np.nan, mitigated_index)
 
@@ -584,7 +629,7 @@ class smc:
         # Work on a copy so the original is not modified.
         shl = swing_highs_lows.copy()
         n = len(ohlc)
-        
+
         # Calculate the pip range based on the overall high-low range.
         pip_range = (ohlc["high"].max() - ohlc["low"].min()) * range_percent
 
@@ -740,7 +785,7 @@ class smc:
                 currently_broken_low = False
                 last_broken_time = resampled_previous_index
 
-            previous_high[i] = resampled_ohlc["high"].iloc[resampled_previous_index] 
+            previous_high[i] = resampled_ohlc["high"].iloc[resampled_previous_index]
             previous_low[i] = resampled_ohlc["low"].iloc[resampled_previous_index]
             currently_broken_high = ohlc["high"].iloc[i] > previous_high[i] or currently_broken_high
             currently_broken_low = ohlc["low"].iloc[i] < previous_low[i] or currently_broken_low
